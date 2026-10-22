@@ -449,6 +449,34 @@ function hashBrand(id) {
   window.claude = { use: async (n) => (n === 'db' ? db : null) };
 })();
 </script>
+<style>
+.trend-legend { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12.5px; color:var(--text-mute); padding:2px 2px 10px; }
+.trend-legend span { display:inline-flex; align-items:center; gap:6px; }
+.trend-legend svg { flex:none; }
+.trend-chart-wrap { width:100%; }
+.trend-chart-wrap svg { display:block; width:100%; height:auto; }
+.trend-chart-wrap text { font-family:inherit; fill:var(--text-mute); }
+.trend-chart-wrap .tr-axis { stroke:var(--border); stroke-width:1; }
+.trend-chart-wrap .tr-grid { stroke:var(--border); stroke-width:1; stroke-dasharray:2 4; opacity:.7; }
+.trend-chart-wrap .tr-earn { stroke:var(--green); fill:none; stroke-width:2.5; }
+.trend-chart-wrap .tr-err { stroke:var(--red); fill:none; stroke-width:2.5; }
+.trend-chart-wrap .tr-goal { stroke-width:1.5; stroke-dasharray:7 5; fill:none; }
+.trend-chart-wrap .tr-trend { stroke-width:2; stroke-dasharray:1 5; stroke-linecap:round; fill:none; opacity:.95; }
+.trend-chart-wrap .tr-dot-earn { fill:var(--green); stroke:var(--card); stroke-width:1.5; }
+.trend-chart-wrap .tr-dot-err { fill:var(--red); stroke:var(--card); stroke-width:1.5; }
+.trend-chart-wrap .tr-val-earn { fill:var(--green); font-size:10.5px; font-weight:600; text-anchor:middle; }
+.trend-chart-wrap .tr-val-err { fill:var(--red); font-size:10.5px; font-weight:600; text-anchor:middle; }
+.trend-chart-wrap .tr-goal-lbl-earn { fill:var(--green); font-size:10.5px; }
+.trend-chart-wrap .tr-goal-lbl-err { fill:var(--red); font-size:10.5px; }
+.trend-chart-wrap .tr-x { font-size:11px; text-anchor:middle; }
+.trend-chart-wrap .tr-x-w { fill:var(--green); font-weight:700; font-size:11px; text-anchor:middle; }
+.trend-chart-wrap .tr-x-l { fill:var(--red); font-weight:700; font-size:11px; text-anchor:middle; }
+.trend-chart-wrap .tr-y { font-size:11px; text-anchor:end; }
+.trend-summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-bottom:16px; }
+.trend-trendline { font-size:12.5px; margin-top:6px; color:var(--text-mute); }
+.trend-trendline strong.up-good, .trend-trendline strong.down-good { color:var(--green); }
+.trend-trendline strong.up-bad, .trend-trendline strong.down-bad { color:var(--red); }
+</style>
 </head><body>
 <div class="app">
 
@@ -481,6 +509,7 @@ function hashBrand(id) {
         <button class="nav-item" data-view="matches"><span class="nav-ico">📋</span> Matches</button>
         <button class="nav-item" data-view="players"><span class="nav-ico">🎽</span> Players</button>
         <button class="nav-item" data-view="goals"><span class="nav-ico">🎯</span> Goals</button>
+        <button class="nav-item" data-view="trends"><span class="nav-ico">📈</span> Trends</button>
         <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span> Settings</button>
       </nav>
     </div>
@@ -652,6 +681,39 @@ function hashBrand(id) {
         <p class="card-sub" style="margin-top:14px;">
           First Ball Kill % and Reception Rating come from VolleyMetrics, not match stat sheets — they're season-wide totals and don't change with the match selector above. Still not tracked (needs play-by-play or pass-grading data this app doesn't collect): Sideout %, Point-Scoring % while serving, Good Pass %, and Reception %.
         </p>
+      </div>
+    </section>
+
+    <section class="view hidden" id="view-trends">
+      <header class="view-header">
+        <div><h1>Trends &mdash; Last 10 Games</h1><p class="subtitle" id="trendsSubtitle">Earned points and error points per set, game by game</p></div>
+      </header>
+
+      <div id="trendsEmpty" class="empty-state hidden">
+        <div class="empty-icon">📈</div>
+        <h2>No matches with set data yet</h2>
+        <p>Once this team has matches with player stats, the trend chart shows up here.</p>
+      </div>
+
+      <div id="trendsContent">
+        <div class="trend-summary tabular" id="trendSummary"></div>
+
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-header"><h3>Earned vs. Error Points / Set</h3><span class="card-sub" id="trendChartSub"></span></div>
+          <div class="trend-legend" id="trendLegend"></div>
+          <div class="trend-chart-wrap" id="trendChart"></div>
+        </div>
+
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-header"><h3>Game by Game</h3><span class="card-sub">Green = meets the team goal</span></div>
+          <div id="trendTableWrap" class="table-scroll"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Player Goals &mdash; Same 10 Games</h3><span class="card-sub">By position &middot; targets from the goals doc</span></div>
+          <div id="trendPlayersWrap" class="table-scroll"></div>
+          <div id="trendUnassigned" class="hidden" style="margin-top:12px;"></div>
+        </div>
       </div>
     </section>
 
@@ -1094,6 +1156,7 @@ function renderCurrentView() {
   if (currentView === 'matchDetail' && currentDetailId) openMatchDetail(currentDetailId, true);
   if (currentView === 'players') renderPlayers();
   if (currentView === 'goals') renderGoals();
+  if (currentView === 'trends' && window.renderTrends) renderTrends();
   if (currentView === 'settings') renderSettings();
 }
 
@@ -1514,6 +1577,165 @@ setTimeout(() => loadLeagueMatches(), 400);
     if (first && (CONF_OF[activeTeamId] || 'ccac') !== activeConf) switchTeam(first.id);
     else { renderTeamSelector(); renderLeagueTable(); }
   });
+})();
+</script>
+<script>
+/* ---------- trends tab: last 10 games, earned vs error points per set, plus player goals ---------- */
+(function () {
+  const N = 10;
+  const goalDef = key => TEAM_GOAL_DEFS.find(d => d.key === key);
+  const EARN_GOAL = goalDef('eps').min, ERR_GOAL = goalDef('errPts').max;
+
+  function gameStats(m) {
+    const sets = Number(m.sets) || 0;
+    if (!sets || !(m.players || []).length) return null;
+    let k = 0, sa = 0, bs = 0, ba = 0, e = 0, se = 0, re = 0;
+    m.players.forEach(p => { k += p.k || 0; sa += p.sa || 0; bs += p.bs || 0; ba += p.ba || 0; e += p.e || 0; se += p.se || 0; re += p.re || 0; });
+    return { m, sets, earn: (k + sa + bs + ba * 0.5) / sets, err: (e + se + re) / sets, earnTot: k + sa + bs + ba * 0.5, errTot: e + se + re };
+  }
+  function lastGames() {
+    return [...matches].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.id || '').localeCompare(b.id || ''))
+      .map(gameStats).filter(Boolean).slice(-N);
+  }
+  function linreg(ys) {
+    const n = ys.length; if (n < 2) return { slope: 0, icpt: ys[0] || 0 };
+    const mx = (n - 1) / 2, my = ys.reduce((s, v) => s + v, 0) / n;
+    let sxy = 0, sxx = 0; ys.forEach((y, i) => { sxy += (i - mx) * (y - my); sxx += (i - mx) ** 2; });
+    const slope = sxy / sxx; return { slope, icpt: my - slope * mx };
+  }
+  const fmt1 = v => v.toFixed(1), fmt2 = v => v.toFixed(2);
+  const shortDate = iso => { const [, mo, d] = (iso || '').split('-'); return mo ? `${+mo}/${+d}` : ''; };
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+  function oppLines(name, max) {
+    const words = name.replace(/\b(University|College|Univ\.?)\b/g, '').replace(/\bof\b/g, '').replace(/\s*\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    const lines = ['']; 
+    words.forEach(w => { const cur = lines[lines.length - 1]; if (!cur) lines[lines.length - 1] = w; else if ((cur + ' ' + w).length <= max) lines[lines.length - 1] = cur + ' ' + w; else lines.push(w); });
+    const out = lines.slice(0, 2).map(l => clip(l, max));
+    if (lines.length > 2) out[1] = clip(out[1] + '…', max);
+    return out;
+  }
+
+  function trendLine(slope, goodWhenUp) {
+    const up = slope > 0.05, down = slope < -0.05;
+    if (!up && !down) return `<strong>flat</strong> (${slope >= 0 ? '+' : ''}${fmt2(slope)} per game)`;
+    const good = (up && goodWhenUp) || (down && !goodWhenUp);
+    return `<strong class="${up ? 'up' : 'down'}-${good ? 'good' : 'bad'}">${up ? '▲' : '▼'} ${slope > 0 ? '+' : ''}${fmt2(slope)} per game</strong> ${good ? '(improving)' : '(moving the wrong way)'}`;
+  }
+
+  function renderSummary(g) {
+    const sets = g.reduce((s, x) => s + x.sets, 0);
+    const earn = g.reduce((s, x) => s + x.earnTot, 0) / sets, err = g.reduce((s, x) => s + x.errTot, 0) / sets;
+    const eReg = linreg(g.map(x => x.earn)), rReg = linreg(g.map(x => x.err));
+    const hitEarn = g.filter(x => x.earn >= EARN_GOAL).length, hitErr = g.filter(x => x.err <= ERR_GOAL).length;
+    const card = (def, val, trendHtml, hit) =>
+      goalCardHtml(def, val).replace(/<div class="goal-pill/, `<div class="trend-trendline">Trend: ${trendHtml}<br>Goal met in ${hit} of ${g.length} games</div><div class="goal-pill`);
+    document.getElementById('trendSummary').innerHTML =
+      card(goalDef('eps'), earn, trendLine(eReg.slope, true), hitEarn) + card(goalDef('errPts'), err, trendLine(rReg.slope, false), hitErr);
+  }
+
+  function renderChart(g) {
+    const wrap = document.getElementById('trendChart');
+    const W = Math.max(300, Math.floor(wrap.clientWidth || 700));
+    const wide = W >= 600, H = W < 520 ? 300 : 340;
+    const ml = 38, mr = wide ? 70 : 56, mt = 22, mb = wide ? 74 : 48;
+    const iw = W - ml - mr, ih = H - mt - mb;
+    const earn = g.map(x => x.earn), err = g.map(x => x.err);
+    const all = earn.concat(err, [EARN_GOAL, ERR_GOAL]);
+    const yMin = Math.max(0, Math.floor(Math.min(...all) - 1)), yMax = Math.ceil(Math.max(...all) + 1);
+    const step = (yMax - yMin) > 16 ? 4 : 2;
+    const y = v => mt + ih - ((v - yMin) / (yMax - yMin)) * ih;
+    const n = g.length, x = i => ml + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
+    const dense = n > 1 && iw / (n - 1) < 34, shown = i => !dense || (n - 1 - i) % 2 === 0; // thin out labels when points are packed
+    const pts = arr => arr.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Line chart of earned points per set and error points per set over the last ${n} games, with goal lines and trend lines. The same numbers are in the table below.">`;
+    for (let t = Math.ceil(yMin / step) * step; t <= yMax; t += step)
+      s += `<line class="tr-grid" x1="${ml}" x2="${W - mr}" y1="${y(t)}" y2="${y(t)}"/><text class="tr-y" x="${ml - 6}" y="${y(t) + 4}">${t}</text>`;
+    s += `<line class="tr-axis" x1="${ml}" x2="${W - mr}" y1="${mt + ih}" y2="${mt + ih}"/>`;
+    // goal lines
+    s += `<line class="tr-goal" style="stroke:var(--green)" x1="${ml}" x2="${W - mr}" y1="${y(EARN_GOAL)}" y2="${y(EARN_GOAL)}"/>`;
+    const goalLbl = (cls, v, txt) => `<text class="${cls}" x="${W - mr + 6}" y="${y(v) - 2}">Goal</text><text class="${cls}" x="${W - mr + 6}" y="${y(v) + 10}">${txt}</text>`;
+    s += goalLbl('tr-goal-lbl-earn', EARN_GOAL, '≥ ' + EARN_GOAL);
+    s += `<line class="tr-goal" style="stroke:var(--red)" x1="${ml}" x2="${W - mr}" y1="${y(ERR_GOAL)}" y2="${y(ERR_GOAL)}"/>`;
+    s += goalLbl('tr-goal-lbl-err', ERR_GOAL, '≤ ' + ERR_GOAL);
+    // trend lines
+    [[earn, 'var(--green)'], [err, 'var(--red)']].forEach(([arr, col]) => {
+      const r = linreg(arr);
+      s += `<line class="tr-trend" style="stroke:${col}" x1="${x(0)}" y1="${y(r.icpt)}" x2="${x(n - 1)}" y2="${y(r.icpt + r.slope * (n - 1))}"/>`;
+    });
+    // data lines + points + value labels
+    s += `<polyline class="tr-earn" points="${pts(earn)}"/><polyline class="tr-err" points="${pts(err)}"/>`;
+    g.forEach((q, i) => {
+      const tip = `${formatDate(q.m.date)} ${q.m.location === 'Away' ? 'at' : 'vs'} ${q.m.opponent} (${q.m.result}): earned ${fmt2(q.earn)}, errors ${fmt2(q.err)} per set`;
+      s += `<circle class="tr-dot-earn" cx="${x(i)}" cy="${y(q.earn)}" r="5"><title>${escapeHtml(tip)}</title></circle>`;
+      s += `<rect class="tr-dot-err" x="${x(i) - 4.5}" y="${y(q.err) - 4.5}" width="9" height="9" rx="1.5"><title>${escapeHtml(tip)}</title></rect>`;
+      const up = q.earn >= q.err;
+      if (shown(i)) {
+        s += `<text class="tr-val-earn" x="${x(i)}" y="${y(q.earn) + (up ? -10 : 18)}">${fmt1(q.earn)}</text>`;
+        s += `<text class="tr-val-err" x="${x(i)}" y="${y(q.err) + (up ? 19 : -10)}">${fmt1(q.err)}</text>`;
+      }
+      const by = mt + ih + 16;
+      if (shown(i)) s += `<text class="tr-x" x="${x(i)}" y="${by}">${shortDate(q.m.date)}</text>`;
+      s += `<text class="${q.m.result === 'W' ? 'tr-x-w' : 'tr-x-l'}" x="${x(i)}" y="${by + 15}">${q.m.result}</text>`;
+      if (wide) oppLines(q.m.opponent || '', Math.max(8, Math.floor(iw / n / 5.8))).forEach((ln, li) => {
+        s += `<text class="tr-x" style="font-size:10px" x="${x(i)}" y="${by + 29 + li * 12}">${escapeHtml(ln)}</text>`;
+      });
+    });
+    wrap.innerHTML = s + '</svg>';
+  }
+
+  function renderLegend(g) {
+    const line = (col, dash, dot) => `<svg width="30" height="12" aria-hidden="true"><line x1="1" x2="29" y1="6" y2="6" stroke="${col}" stroke-width="2.5" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round"/>${dot || ''}</svg>`;
+    document.getElementById('trendLegend').innerHTML =
+      `<span>${line('var(--green)', '', '<circle cx="15" cy="6" r="4.5" fill="var(--green)"/>')} Earned pts / set</span>` +
+      `<span>${line('var(--red)', '', '<rect x="10.5" y="1.5" width="9" height="9" rx="1.5" fill="var(--red)"/>')} Error pts / set</span>` +
+      `<span>${line('var(--text-mute)', '7 5')} Team goal</span><span>${line('var(--text-mute)', '1 5')} Trend line</span>`;
+    document.getElementById('trendChartSub').textContent = `${formatDate(g[0].m.date)} – ${formatDate(g[g.length - 1].m.date)} · ${g.length} games`;
+  }
+
+  function renderTable(g) {
+    const cell = (v, ok) => `<td class="goal-cell goal-${ok ? 'good' : 'behind'}"><div class="goal-cell-val">${fmt2(v)}</div></td>`;
+    document.getElementById('trendTableWrap').innerHTML =
+      `<table class="stats-table tabular"><thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th>Sets</th><th>Earned / Set</th><th>Error Pts / Set</th></tr></thead><tbody>${
+        g.map(q => `<tr><td>${formatDate(q.m.date)}</td><td>${q.m.location === 'Away' ? 'at' : 'vs'} ${escapeHtml(q.m.opponent || '')}</td><td><span class="pill ${q.m.result === 'W' ? 'pill-w' : 'pill-l'}">${q.m.result}</span></td><td>${q.sets}</td>${cell(q.earn, q.earn >= EARN_GOAL)}${cell(q.err, q.err <= ERR_GOAL)}</tr>`).join('')
+      }</tbody></table>`;
+  }
+
+  function playerRow(p) {
+    const pos = positions[p.name], sp = p.sp || 0;
+    const hit = p.ta ? (p.k - p.e) / p.ta : 0, er = p.ta ? p.e / p.ta : 0, kill = p.ta ? p.k / p.ta : 0;
+    const blocks = sp ? ((p.bs || 0) + (p.ba || 0) * 0.5) / sp : 0, digs = sp ? (p.d || 0) / sp : 0;
+    const atk = ATTACK_TARGETS[pos], dg = DIGS_TARGETS[pos];
+    return `<tr><td>${escapeHtml(p.name)}</td><td>${pos}</td><td>${sp}</td>` +
+      (atk ? goalCell(hit, 'range', atk.hit[0], atk.hit[1], true) : NA_CELL) +
+      (atk ? goalCell(er, 'max', 0, atk.err, true) : NA_CELL) +
+      (atk ? goalCell(kill, 'range', atk.kill[0], atk.kill[1], true) : NA_CELL) +
+      (atk ? goalCell(blocks, 'range', atk.blocks[0], atk.blocks[1], false) : NA_CELL) +
+      (dg !== undefined ? goalCell(digs, 'min', dg, 0, false) : NA_CELL) + '</tr>';
+  }
+  function renderPlayers(g) {
+    const totals = aggregatePlayers(g.map(q => q.m));
+    const withPos = totals.filter(p => positions[p.name] && p.sp > 0).sort((a, b) => POSITIONS.indexOf(positions[a.name]) - POSITIONS.indexOf(positions[b.name]) || b.sp - a.sp);
+    const without = totals.filter(p => !positions[p.name] && p.sp > 0);
+    document.getElementById('trendPlayersWrap').innerHTML = withPos.length === 0
+      ? '<div class="card-sub">Player goals are position-based, and no positions are assigned for this team yet.</div>'
+      : `<table class="stats-table tabular"><thead><tr><th>Player</th><th>Pos</th><th>Sets</th><th>Hit%</th><th>Error%</th><th>Kill%</th><th>Blocks/Set</th><th>Digs/Set</th></tr></thead><tbody>${withPos.map(playerRow).join('')}</tbody></table>`;
+    const un = document.getElementById('trendUnassigned');
+    if (without.length && withPos.length) { un.classList.remove('hidden'); un.innerHTML = `<div class="card-sub">No position set (goals hidden): ${without.map(p => escapeHtml(p.name)).join(', ')}</div>`; }
+    else { un.classList.add('hidden'); un.innerHTML = ''; }
+  }
+
+  window.renderTrends = function () {
+    const g = lastGames();
+    const empty = g.length === 0;
+    document.getElementById('trendsEmpty').classList.toggle('hidden', !empty);
+    document.getElementById('trendsContent').classList.toggle('hidden', empty);
+    document.getElementById('trendsSubtitle').textContent = `${teamName} · earned points and error points per set, last ${g.length || N} games vs. the team goals`;
+    if (empty) return;
+    renderSummary(g); renderLegend(g); renderChart(g); renderTable(g); renderPlayers(g);
+  };
+  let t = null;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => { if (currentView === 'trends') renderTrends(); }, 150); });
 })();
 </script>
 
